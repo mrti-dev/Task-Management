@@ -1,0 +1,16 @@
+package com.tiendev.task_management_api.model.enums;
+
+public enum NotificationType {
+    WORKSPACE_CREATED,
+    PROJECT_CREATED,
+    PROJECT_UPDATED,
+    PROJECT_DELETED,
+    TASK_CREATED,
+    TASK_ASSIGNED,
+    TASK_CLAIMED,
+    TASK_STATUS_CHANGED,
+    TASK_PRIORITY_CHANGED,
+    TASK_DELETED,
+    WORKSPACE_MEMBER_ADDED,
+    WORKSPACE_MEMBER_ROLE_CHANGED
+}

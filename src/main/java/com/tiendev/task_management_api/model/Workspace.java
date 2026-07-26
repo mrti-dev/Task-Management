@@ -30,6 +30,9 @@ public class Workspace {
     @Column(length = 500)
     private String description;
 
+    @Column(name = "deleted", nullable = false)
+    private boolean deleted = true;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

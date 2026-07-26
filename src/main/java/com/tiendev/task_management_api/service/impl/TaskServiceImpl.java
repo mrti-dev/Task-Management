@@ -1,22 +1,37 @@
 package com.tiendev.task_management_api.service.impl;
 
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.tiendev.task_management_api.dto.PageResponse;
 import com.tiendev.task_management_api.dto.TaskResponse;
 import com.tiendev.task_management_api.dto.UserResponse;
 import com.tiendev.task_management_api.dto.request.TaskCreateRequest;
 import com.tiendev.task_management_api.dto.request.TaskUpdateRequest;
+import com.tiendev.task_management_api.exception.InvalidOperationException;
 import com.tiendev.task_management_api.exception.ResourceNotFoundException;
 import com.tiendev.task_management_api.model.Project;
 import com.tiendev.task_management_api.model.Task;
 import com.tiendev.task_management_api.model.User;
+import com.tiendev.task_management_api.model.WorkspaceMember;
+import com.tiendev.task_management_api.model.enums.NotificationType;
+import com.tiendev.task_management_api.model.enums.TaskPriority;
 import com.tiendev.task_management_api.model.enums.TaskStatus;
+import com.tiendev.task_management_api.model.enums.WorkspaceRole;
 import com.tiendev.task_management_api.repository.ProjectRepository;
 import com.tiendev.task_management_api.repository.TaskRepository;
 import com.tiendev.task_management_api.repository.UserRepository;
+import com.tiendev.task_management_api.repository.WorkspaceMemberRepository;
+import com.tiendev.task_management_api.service.NotificationService;
 import com.tiendev.task_management_api.service.TaskService;
 
 import lombok.RequiredArgsConstructor;
@@ -28,17 +43,24 @@ public class TaskServiceImpl implements TaskService {
 	private final TaskRepository taskRepository;
 	private final ProjectRepository projectRepository;
 	private final UserRepository userRepository;
+	private final WorkspaceMemberRepository workspaceMemberRepository;
+	private final NotificationService notificationService;
 
 	@Override
 	@Transactional
 	public TaskResponse create(TaskCreateRequest request) {
 		Project project = projectRepository.findById(request.getProjectId()).orElseThrow(
 				() -> new ResourceNotFoundException("Project not found with id: " + request.getProjectId()));
+		if (!project.isDeleted() || !project.getWorkspace().isDeleted()) {
+			throw new ResourceNotFoundException("Project not found with id: " + request.getProjectId());
+		}
+		validateOwner(project.getWorkspace().getId());
 
 		User assignee = null;
 		if (request.getAssigneeId() != null) {
 			assignee = userRepository.findById(request.getAssigneeId()).orElseThrow(
 					() -> new ResourceNotFoundException("User not found with id: " + request.getAssigneeId()));
+			validateMemberInWorkspace(assignee.getId(), project.getWorkspace().getId());
 		}
 
 		Task task = new Task();
@@ -50,7 +72,18 @@ public class TaskServiceImpl implements TaskService {
 		task.setAssignee(assignee);
 		task.setDeadline(request.getDeadline());
 
+		validateDeadline(task);
+
 		task = taskRepository.save(task);
+
+		if (assignee != null) {
+			Long senderId = getCurrentUserId();
+			notificationService.createNotification("Nhiệm vụ mới: " + task.getTitle(),
+					"Bạn được giao nhiệm vụ \"" + task.getTitle() + "\" trong dự án \"" + project.getName() + "\".",
+					NotificationType.TASK_CREATED, assignee.getId(), senderId,
+					task.getId(), project.getId(), project.getWorkspace().getId());
+		}
+
 		return toTaskResponse(task);
 	}
 
@@ -59,13 +92,22 @@ public class TaskServiceImpl implements TaskService {
 	public TaskResponse getById(Long id) {
 		Task task = taskRepository.findById(id)
 				.orElseThrow(() -> new ResourceNotFoundException("Task not found with id: " + id));
+		if (!task.isDeleted() || !task.getProject().isDeleted() || !task.getProject().getWorkspace().isDeleted()) {
+			throw new ResourceNotFoundException("Task not found with id: " + id);
+		}
+		validateMembership(task.getProject().getWorkspace().getId());
 		return toTaskResponse(task);
 	}
 
 	@Override
 	@Transactional(readOnly = true)
-	public List<TaskResponse> getAll() {
-		return taskRepository.findAll().stream().map(this::toTaskResponse).toList();
+	public PageResponse<TaskResponse> getAll(Pageable pageable) {
+		Set<Long> memberWorkspaceIds = getMemberWorkspaceIds();
+		Page<Task> page = taskRepository.findAllActiveByWorkspaceIds(memberWorkspaceIds, pageable);
+		List<TaskResponse> content = page.getContent().stream()
+				.map(this::toTaskResponse)
+				.toList();
+		return PageResponse.from(page, content);
 	}
 
 	@Override
@@ -73,6 +115,14 @@ public class TaskServiceImpl implements TaskService {
 	public TaskResponse update(Long id, TaskUpdateRequest request) {
 		Task task = taskRepository.findById(id)
 				.orElseThrow(() -> new ResourceNotFoundException("Task not found with id: " + id));
+		if (!task.isDeleted() || !task.getProject().isDeleted() || !task.getProject().getWorkspace().isDeleted()) {
+			throw new ResourceNotFoundException("Task not found with id: " + id);
+		}
+		validateOwner(task.getProject().getWorkspace().getId());
+
+		TaskStatus oldStatus = task.getStatus();
+		TaskPriority oldPriority = task.getPriority();
+		Long oldAssigneeId = task.getAssignee() != null ? task.getAssignee().getId() : null;
 
 		if (request.getTitle() != null) {
 			task.setTitle(request.getTitle());
@@ -86,26 +136,151 @@ public class TaskServiceImpl implements TaskService {
 		if (request.getStatus() != null) {
 			task.setStatus(request.getStatus());
 		}
-		if (request.getAssigneeId() != null) {
+		if (request.isUnassign()) {
+			task.setAssignee(null);
+		} else if (request.getAssigneeId() != null) {
 			User assignee = userRepository.findById(request.getAssigneeId()).orElseThrow(
 					() -> new ResourceNotFoundException("User not found with id: " + request.getAssigneeId()));
+			validateMemberInWorkspace(assignee.getId(), task.getProject().getWorkspace().getId());
 			task.setAssignee(assignee);
 		}
 		if (request.getDeadline() != null) {
 			task.setDeadline(request.getDeadline());
+			validateDeadline(task);
 		}
 
 		task = taskRepository.save(task);
+
+		Long workspaceId = task.getProject().getWorkspace().getId();
+		Long currentUserId = getCurrentUserId();
+		Long newAssigneeId = task.getAssignee() != null ? task.getAssignee().getId() : null;
+		User assigneeUser = task.getAssignee();
+
+		boolean statusChanged = request.getStatus() != null && !request.getStatus().equals(oldStatus);
+		boolean priorityChanged = request.getPriority() != null && !request.getPriority().equals(oldPriority);
+		boolean assigneeChanged = newAssigneeId != null && !newAssigneeId.equals(oldAssigneeId);
+		boolean taskClaimed = oldAssigneeId == null && newAssigneeId != null;
+
+		if (statusChanged && assigneeUser != null) {
+			notificationService.createNotification("Trạng thái nhiệm vụ đã thay đổi: " + task.getTitle(),
+					"Nhiệm vụ \"" + task.getTitle() + "\" chuyển từ " + oldStatus + " sang " + task.getStatus() + ".",
+					NotificationType.TASK_STATUS_CHANGED, assigneeUser.getId(), currentUserId, task.getId(),
+					task.getProject().getId(), workspaceId);
+		}
+
+		if (priorityChanged && assigneeUser != null) {
+			notificationService.createNotification("Ưu tiên nhiệm vụ đã thay đổi: " + task.getTitle(),
+					"Nhiệm vụ \"" + task.getTitle() + "\" chuyển từ " + oldPriority + " sang " + task.getPriority()
+							+ ".",
+					NotificationType.TASK_PRIORITY_CHANGED, assigneeUser.getId(), currentUserId, task.getId(),
+					task.getProject().getId(), workspaceId);
+		}
+
+		if (taskClaimed) {
+			notificationService.createNotification("Nhiệm vụ đã được nhận: " + task.getTitle(),
+					assigneeUser.getUsername() + " đã nhận nhiệm vụ \"" + task.getTitle() + "\".",
+					NotificationType.TASK_CLAIMED, currentUserId, assigneeUser.getId(), task.getId(),
+					task.getProject().getId(), workspaceId);
+		} else if (assigneeChanged) {
+			notificationService.createNotification("Bạn được gán nhiệm vụ: " + task.getTitle(),
+					"Bạn được gán nhiệm vụ \"" + task.getTitle() + "\" trong dự án \"" + task.getProject().getName()
+							+ "\".",
+					NotificationType.TASK_ASSIGNED, newAssigneeId, currentUserId, task.getId(),
+					task.getProject().getId(), workspaceId);
+		}
+
 		return toTaskResponse(task);
 	}
 
 	@Override
 	@Transactional
 	public void delete(Long id) {
-		if (!taskRepository.existsById(id)) {
+		Task task = taskRepository.findById(id)
+				.orElseThrow(() -> new ResourceNotFoundException("Task not found with id: " + id));
+		if (!task.isDeleted() || !task.getProject().isDeleted() || !task.getProject().getWorkspace().isDeleted()) {
 			throw new ResourceNotFoundException("Task not found with id: " + id);
 		}
-		taskRepository.deleteById(id);
+		validateOwner(task.getProject().getWorkspace().getId());
+
+		Long assigneeId = task.getAssignee() != null ? task.getAssignee().getId() : null;
+		String taskTitle = task.getTitle();
+		String projectName = task.getProject().getName();
+		Long projectId = task.getProject().getId();
+		Long workspaceId = task.getProject().getWorkspace().getId();
+
+		task.setDeleted(false);
+		taskRepository.save(task);
+
+		if (assigneeId != null) {
+			Long senderId = getCurrentUserId();
+			notificationService.createNotification(
+					"Nhiệm vụ đã bị xóa: " + taskTitle,
+					"Nhiệm vụ \"" + taskTitle + "\" đã bị xóa khỏi dự án \"" + projectName + "\".",
+					NotificationType.TASK_DELETED,
+					assigneeId,
+					senderId,
+					null,
+					projectId,
+					workspaceId
+			);
+		}
+	}
+
+	private Long getCurrentUserId() {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		return Long.valueOf(auth.getName());
+	}
+
+	private Set<Long> getMemberWorkspaceIds() {
+		Long currentUserId = getCurrentUserId();
+		return workspaceMemberRepository.findByUserId(currentUserId).stream()
+				.map(m -> m.getWorkspace().getId())
+				.collect(Collectors.toSet());
+	}
+
+	private void validateMembership(Long workspaceId) {
+		Long currentUserId = getCurrentUserId();
+		if (!workspaceMemberRepository.existsByWorkspaceIdAndUserId(workspaceId, currentUserId)) {
+			throw new ResourceNotFoundException("Task not found");
+		}
+	}
+
+	private void validateOwner(Long workspaceId) {
+		Long currentUserId = getCurrentUserId();
+		boolean isOwner = workspaceMemberRepository.findByWorkspaceIdAndRole(workspaceId, WorkspaceRole.OWNER)
+				.filter(owner -> owner.getUser().getId().equals(currentUserId))
+				.isPresent();
+		if (!isOwner) {
+			throw new InvalidOperationException("Only workspace owner can perform this action.");
+		}
+	}
+
+	private void validateDeadline(Task task) {
+		if (task.getDeadline() == null) {
+			return;
+		}
+		Project project = task.getProject();
+
+		if (project.getStartDate() != null && task.getDeadline().isBefore(project.getStartDate())) {
+			throw new InvalidOperationException(
+					"Task deadline cannot be before project start date (" + project.getStartDate() + ").");
+		}
+		if (project.getEndDate() != null && task.getDeadline().isAfter(project.getEndDate())) {
+			throw new InvalidOperationException(
+					"Task deadline cannot be after project end date (" + project.getEndDate() + ").");
+		}
+	}
+
+	private void validateMemberInWorkspace(Long userId, Long workspaceId) {
+		if (!workspaceMemberRepository.existsByWorkspaceIdAndUserId(workspaceId, userId)) {
+			throw new InvalidOperationException(
+					"User is not a member of this workspace and cannot be assigned to a task.");
+		}
+	}
+
+	private User getWorkspaceOwner(Long workspaceId) {
+		return workspaceMemberRepository.findByWorkspaceIdAndRole(workspaceId, WorkspaceRole.OWNER)
+				.map(WorkspaceMember::getUser).orElse(null);
 	}
 
 	private TaskResponse toTaskResponse(Task task) {
@@ -113,8 +288,7 @@ public class TaskServiceImpl implements TaskService {
 		if (task.getAssignee() != null) {
 			assigneeResponse = UserResponse.builder().id(task.getAssignee().getId())
 					.username(task.getAssignee().getUsername()).email(task.getAssignee().getEmail())
-					.avatar(task.getAssignee().getAvatar())
-					.role(task.getAssignee().getRole()).build();
+					.avatar(task.getAssignee().getAvatar()).role(task.getAssignee().getRole()).build();
 		}
 
 		return TaskResponse.builder().id(task.getId()).projectId(task.getProject().getId())

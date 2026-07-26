@@ -1,5 +1,6 @@
 package com.tiendev.task_management_api.controller;
 
+import com.tiendev.task_management_api.dto.PageResponse;
 import com.tiendev.task_management_api.dto.TaskResponse;
 import com.tiendev.task_management_api.dto.request.TaskCreateRequest;
 import com.tiendev.task_management_api.dto.request.TaskUpdateRequest;
@@ -7,10 +8,11 @@ import com.tiendev.task_management_api.helper.ApiResponse;
 import com.tiendev.task_management_api.service.TaskService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/tasks")
@@ -26,8 +28,9 @@ public class TaskController {
     }
 
     @GetMapping
-    public ResponseEntity<ApiResponse<List<TaskResponse>>> getAll() {
-        List<TaskResponse> responses = taskService.getAll();
+    public ResponseEntity<ApiResponse<PageResponse<TaskResponse>>> getAll(
+            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+        PageResponse<TaskResponse> responses = taskService.getAll(pageable);
         return ApiResponse.success(responses);
     }
 

@@ -1,15 +1,15 @@
 package com.tiendev.task_management_api.service;
 
+import com.tiendev.task_management_api.dto.PageResponse;
 import com.tiendev.task_management_api.dto.ProjectResponse;
 import com.tiendev.task_management_api.dto.request.ProjectCreateRequest;
 import com.tiendev.task_management_api.dto.request.ProjectUpdateRequest;
-
-import java.util.List;
+import org.springframework.data.domain.Pageable;
 
 public interface ProjectService {
     ProjectResponse create(ProjectCreateRequest request);
     ProjectResponse getById(Long id);
-    List<ProjectResponse> getAll();
+    PageResponse<ProjectResponse> getAll(Pageable pageable);
     ProjectResponse update(Long id, ProjectUpdateRequest request);
     void delete(Long id);
 }

@@ -25,7 +25,5 @@ public class ProjectCreateRequest {
 
     private ProjectStatus status;
 
-    private LocalDate startDate;
-
     private LocalDate endDate;
 }

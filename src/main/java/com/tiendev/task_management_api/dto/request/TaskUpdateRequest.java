@@ -7,7 +7,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 
 @Data
 @Builder
@@ -19,5 +19,6 @@ public class TaskUpdateRequest {
     private TaskPriority priority;
     private TaskStatus status;
     private Long assigneeId;
-    private LocalDateTime deadline;
+    private boolean unassign;
+    private LocalDate deadline;
 }

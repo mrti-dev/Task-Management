@@ -16,6 +16,5 @@ public class ProjectUpdateRequest {
     private String name;
     private String description;
     private ProjectStatus status;
-    private LocalDate startDate;
     private LocalDate endDate;
 }

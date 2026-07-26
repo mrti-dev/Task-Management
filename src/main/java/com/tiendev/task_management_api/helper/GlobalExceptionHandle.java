@@ -10,21 +10,32 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import com.tiendev.task_management_api.exception.InvalidOperationException;
 import com.tiendev.task_management_api.exception.ResourceAlreadyExistsException;
 import com.tiendev.task_management_api.exception.ResourceNotFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandle {
-	// bat exception ma chua thiet lap
-	@ExceptionHandler(Exception.class)
-	public ResponseEntity<?> handleAllException(Exception ex) {
-		System.out.println(ex);
+
+	@ExceptionHandler(ResourceNotFoundException.class)
+	public ResponseEntity<?> handleNotFound(ResourceNotFoundException ex) {
+		return ApiResponse.error(HttpStatus.NOT_FOUND, ex.getMessage());
+	}
+
+	@ExceptionHandler(InvalidOperationException.class)
+	public ResponseEntity<?> handleInvalidOperation(InvalidOperationException ex) {
+		return ApiResponse.error(HttpStatus.FORBIDDEN, ex.getMessage());
+	}
+
+	@ExceptionHandler(ResourceAlreadyExistsException.class)
+	public ResponseEntity<?> handleAlreadyExists(ResourceAlreadyExistsException ex) {
 		return ApiResponse.error(HttpStatus.BAD_REQUEST, ex.getMessage());
 	}
 
-	@ExceptionHandler({ ResourceAlreadyExistsException.class, ResourceNotFoundException.class })
-	public ResponseEntity<?> handleNotFounf(Exception ex) {
-		return ApiResponse.error(HttpStatus.BAD_REQUEST, ex.getMessage());
+	@ExceptionHandler(Exception.class)
+	public ResponseEntity<?> handleAllException(Exception ex) {
+		System.out.println(ex);
+		return ApiResponse.error(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
 	}
 
 	// loi truyen url

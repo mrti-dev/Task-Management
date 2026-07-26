@@ -1,7 +1,10 @@
 package com.tiendev.task_management_api.dto.request;
 
+import java.time.LocalDate;
+
 import com.tiendev.task_management_api.model.enums.TaskPriority;
 import com.tiendev.task_management_api.model.enums.TaskStatus;
+
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
@@ -9,27 +12,25 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
-
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class TaskCreateRequest {
-    @NotNull
-    private Long projectId;
+	@NotNull
+	private Long projectId;
 
-    @NotBlank
-    private String title;
+	@NotBlank
+	private String title;
 
-    private String description;
+	private String description;
 
-    @NotNull
-    private TaskPriority priority;
+	@NotNull
+	private TaskPriority priority;
 
-    private TaskStatus status;
+	private TaskStatus status;
 
-    private Long assigneeId;
+	private Long assigneeId;
 
-    private LocalDateTime deadline;
+	private LocalDate deadline;
 }
