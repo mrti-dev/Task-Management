@@ -46,9 +46,10 @@ public class NotificationController {
         return ApiResponse.success(count);
     }
 
-    @PutMapping("/{id}/read")
-    public ResponseEntity<ApiResponse<Void>> markAsRead(@PathVariable Long id) {
-        notificationService.markAsRead(id);
+    @PutMapping("/user/{userId}/read/{id}")
+    public ResponseEntity<ApiResponse<Void>> markAsRead(@PathVariable Long userId, @PathVariable Long id) {
+        checkNotificationOwner(userId);
+        notificationService.markAsRead(id, userId);
         return ApiResponse.success(null, "Notification marked as read");
     }
 

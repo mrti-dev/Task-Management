@@ -3,6 +3,7 @@ package com.tiendev.task_management_api.controller;
 import com.tiendev.task_management_api.dto.PageResponse;
 import com.tiendev.task_management_api.dto.ProjectResponse;
 import com.tiendev.task_management_api.dto.request.ProjectCreateRequest;
+import com.tiendev.task_management_api.dto.request.ProjectFilterRequest;
 import com.tiendev.task_management_api.dto.request.ProjectUpdateRequest;
 import com.tiendev.task_management_api.helper.ApiResponse;
 import com.tiendev.task_management_api.service.ProjectService;
@@ -29,8 +30,9 @@ public class ProjectController {
 
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<ProjectResponse>>> getAll(
+            @ModelAttribute ProjectFilterRequest filter,
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
-        PageResponse<ProjectResponse> responses = projectService.getAll(pageable);
+        PageResponse<ProjectResponse> responses = projectService.getAll(filter, pageable);
         return ApiResponse.success(responses);
     }
 

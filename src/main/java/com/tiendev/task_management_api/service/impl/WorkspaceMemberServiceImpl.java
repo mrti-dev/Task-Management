@@ -4,6 +4,7 @@ import com.tiendev.task_management_api.dto.UserResponse;
 import com.tiendev.task_management_api.dto.WorkspaceMemberResponse;
 import com.tiendev.task_management_api.dto.request.WorkspaceMemberCreateRequest;
 import com.tiendev.task_management_api.dto.request.WorkspaceMemberUpdateRequest;
+import com.tiendev.task_management_api.exception.BusinessException;
 import com.tiendev.task_management_api.exception.InvalidOperationException;
 import com.tiendev.task_management_api.exception.ResourceAlreadyExistsException;
 import com.tiendev.task_management_api.exception.ResourceNotFoundException;
@@ -15,6 +16,9 @@ import com.tiendev.task_management_api.model.enums.WorkspaceRole;
 import com.tiendev.task_management_api.repository.UserRepository;
 import com.tiendev.task_management_api.repository.WorkspaceMemberRepository;
 import com.tiendev.task_management_api.repository.WorkspaceRepository;
+import com.tiendev.task_management_api.model.enums.ActivityAction;
+import com.tiendev.task_management_api.model.enums.EntityType;
+import com.tiendev.task_management_api.service.ActivityLogService;
 import com.tiendev.task_management_api.service.NotificationService;
 import com.tiendev.task_management_api.service.WorkspaceMemberService;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +39,7 @@ public class WorkspaceMemberServiceImpl implements WorkspaceMemberService {
     private final WorkspaceRepository workspaceRepository;
     private final UserRepository userRepository;
     private final NotificationService notificationService;
+    private final ActivityLogService activityLogService;
 
     @Override
     @Transactional
@@ -56,16 +61,21 @@ public class WorkspaceMemberServiceImpl implements WorkspaceMemberService {
 
         member = workspaceMemberRepository.save(member);
 
+        Long currentUserId = getCurrentUserId();
+
         notificationService.createNotification(
                 "Bạn đã được thêm vào workspace: " + workspace.getName(),
                 "Bạn đã được thêm vào workspace \"" + workspace.getName() + "\" với vai trò " + request.getRole() + ".",
                 NotificationType.valueOf("WORKSPACE_MEMBER_ADDED"),
                 user.getId(),
-                getCurrentUserId(),
+                currentUserId,
                 null,
                 null,
                 workspace.getId()
         );
+
+        activityLogService.log(EntityType.WORKSPACE_MEMBER, member.getId(), ActivityAction.MEMBER_ADDED,
+                null, null, user.getUsername(), currentUserId, workspace.getId());
 
         return toWorkspaceMemberResponse(member);
     }
@@ -102,13 +112,15 @@ public class WorkspaceMemberServiceImpl implements WorkspaceMemberService {
             long ownerCount = workspaceMemberRepository.countByWorkspaceIdAndRole(
                     member.getWorkspace().getId(), WorkspaceRole.OWNER);
             if (ownerCount <= 1) {
-                throw new InvalidOperationException(
+                throw new BusinessException(
                         "Cannot change role of the last owner. Workspace must have at least one owner.");
             }
         }
 
         member.setRole(newRole);
         member = workspaceMemberRepository.save(member);
+
+        Long currentUserId = getCurrentUserId();
 
         if (oldRole != newRole) {
             notificationService.createNotification(
@@ -117,12 +129,15 @@ public class WorkspaceMemberServiceImpl implements WorkspaceMemberService {
                             + "\" đã thay đổi từ " + oldRole + " thành " + newRole + ".",
                     NotificationType.valueOf("WORKSPACE_MEMBER_ROLE_CHANGED"),
                     member.getUser().getId(),
-                    getCurrentUserId(),
+                    currentUserId,
                     null,
                     null,
                     member.getWorkspace().getId()
             );
         }
+
+        activityLogService.log(EntityType.WORKSPACE_MEMBER, member.getId(), ActivityAction.ROLE_CHANGED,
+                "role", oldRole.name(), newRole.name(), currentUserId, member.getWorkspace().getId());
 
         return toWorkspaceMemberResponse(member);
     }
@@ -138,12 +153,20 @@ public class WorkspaceMemberServiceImpl implements WorkspaceMemberService {
             long ownerCount = workspaceMemberRepository.countByWorkspaceIdAndRole(
                     member.getWorkspace().getId(), WorkspaceRole.OWNER);
             if (ownerCount <= 1) {
-                throw new InvalidOperationException(
+                throw new BusinessException(
                         "Cannot remove the last owner. Workspace must have at least one owner.");
             }
         }
 
+        Long currentUserId = getCurrentUserId();
+        Long memberId = member.getId();
+        Long workspaceId = member.getWorkspace().getId();
+        String username = member.getUser().getUsername();
+
         workspaceMemberRepository.deleteById(id);
+
+        activityLogService.log(EntityType.WORKSPACE_MEMBER, memberId, ActivityAction.MEMBER_REMOVED,
+                null, null, username, currentUserId, workspaceId);
     }
 
     private Long getCurrentUserId() {

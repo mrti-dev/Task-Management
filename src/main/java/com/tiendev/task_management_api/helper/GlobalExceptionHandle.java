@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import com.tiendev.task_management_api.exception.BusinessException;
 import com.tiendev.task_management_api.exception.InvalidOperationException;
 import com.tiendev.task_management_api.exception.ResourceAlreadyExistsException;
 import com.tiendev.task_management_api.exception.ResourceNotFoundException;
@@ -25,6 +26,11 @@ public class GlobalExceptionHandle {
 	@ExceptionHandler(InvalidOperationException.class)
 	public ResponseEntity<?> handleInvalidOperation(InvalidOperationException ex) {
 		return ApiResponse.error(HttpStatus.FORBIDDEN, ex.getMessage());
+	}
+
+	@ExceptionHandler(BusinessException.class)
+	public ResponseEntity<?> handleBusinessException(BusinessException ex) {
+		return ApiResponse.error(HttpStatus.BAD_REQUEST, ex.getMessage());
 	}
 
 	@ExceptionHandler(ResourceAlreadyExistsException.class)

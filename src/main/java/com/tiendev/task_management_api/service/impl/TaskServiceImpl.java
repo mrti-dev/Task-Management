@@ -7,6 +7,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -16,13 +17,17 @@ import com.tiendev.task_management_api.dto.PageResponse;
 import com.tiendev.task_management_api.dto.TaskResponse;
 import com.tiendev.task_management_api.dto.UserResponse;
 import com.tiendev.task_management_api.dto.request.TaskCreateRequest;
+import com.tiendev.task_management_api.dto.request.TaskFilterRequest;
 import com.tiendev.task_management_api.dto.request.TaskUpdateRequest;
+import com.tiendev.task_management_api.exception.BusinessException;
 import com.tiendev.task_management_api.exception.InvalidOperationException;
 import com.tiendev.task_management_api.exception.ResourceNotFoundException;
 import com.tiendev.task_management_api.model.Project;
 import com.tiendev.task_management_api.model.Task;
 import com.tiendev.task_management_api.model.User;
 import com.tiendev.task_management_api.model.WorkspaceMember;
+import com.tiendev.task_management_api.model.enums.ActivityAction;
+import com.tiendev.task_management_api.model.enums.EntityType;
 import com.tiendev.task_management_api.model.enums.NotificationType;
 import com.tiendev.task_management_api.model.enums.TaskPriority;
 import com.tiendev.task_management_api.model.enums.TaskStatus;
@@ -31,6 +36,8 @@ import com.tiendev.task_management_api.repository.ProjectRepository;
 import com.tiendev.task_management_api.repository.TaskRepository;
 import com.tiendev.task_management_api.repository.UserRepository;
 import com.tiendev.task_management_api.repository.WorkspaceMemberRepository;
+import com.tiendev.task_management_api.repository.spec.TaskSpecifications;
+import com.tiendev.task_management_api.service.ActivityLogService;
 import com.tiendev.task_management_api.service.NotificationService;
 import com.tiendev.task_management_api.service.TaskService;
 
@@ -45,13 +52,14 @@ public class TaskServiceImpl implements TaskService {
 	private final UserRepository userRepository;
 	private final WorkspaceMemberRepository workspaceMemberRepository;
 	private final NotificationService notificationService;
+	private final ActivityLogService activityLogService;
 
 	@Override
 	@Transactional
 	public TaskResponse create(TaskCreateRequest request) {
 		Project project = projectRepository.findById(request.getProjectId()).orElseThrow(
 				() -> new ResourceNotFoundException("Project not found with id: " + request.getProjectId()));
-		if (!project.isDeleted() || !project.getWorkspace().isDeleted()) {
+		if (!project.isActive() || !project.getWorkspace().isActive()) {
 			throw new ResourceNotFoundException("Project not found with id: " + request.getProjectId());
 		}
 		validateOwner(project.getWorkspace().getId());
@@ -76,13 +84,18 @@ public class TaskServiceImpl implements TaskService {
 
 		task = taskRepository.save(task);
 
+		Long currentUserId = getCurrentUserId();
+		Long workspaceId = project.getWorkspace().getId();
+
 		if (assignee != null) {
-			Long senderId = getCurrentUserId();
 			notificationService.createNotification("Nhiệm vụ mới: " + task.getTitle(),
 					"Bạn được giao nhiệm vụ \"" + task.getTitle() + "\" trong dự án \"" + project.getName() + "\".",
-					NotificationType.TASK_CREATED, assignee.getId(), senderId,
-					task.getId(), project.getId(), project.getWorkspace().getId());
+					NotificationType.TASK_CREATED, assignee.getId(), currentUserId,
+					task.getId(), project.getId(), workspaceId);
 		}
+
+		activityLogService.log(EntityType.TASK, task.getId(), ActivityAction.CREATED,
+				null, null, task.getTitle(), currentUserId, workspaceId);
 
 		return toTaskResponse(task);
 	}
@@ -92,7 +105,7 @@ public class TaskServiceImpl implements TaskService {
 	public TaskResponse getById(Long id) {
 		Task task = taskRepository.findById(id)
 				.orElseThrow(() -> new ResourceNotFoundException("Task not found with id: " + id));
-		if (!task.isDeleted() || !task.getProject().isDeleted() || !task.getProject().getWorkspace().isDeleted()) {
+		if (!task.isActive() || !task.getProject().isActive() || !task.getProject().getWorkspace().isActive()) {
 			throw new ResourceNotFoundException("Task not found with id: " + id);
 		}
 		validateMembership(task.getProject().getWorkspace().getId());
@@ -111,18 +124,37 @@ public class TaskServiceImpl implements TaskService {
 	}
 
 	@Override
+	@Transactional(readOnly = true)
+	public PageResponse<TaskResponse> getAll(TaskFilterRequest filter, Pageable pageable) {
+		Set<Long> memberWorkspaceIds = getMemberWorkspaceIds();
+		Specification<Task> spec = Specification
+				.where(TaskSpecifications.isActive())
+				.and(TaskSpecifications.inWorkspaces(memberWorkspaceIds))
+				.and(TaskSpecifications.fromFilter(filter));
+		Page<Task> page = taskRepository.findAll(spec, pageable);
+		List<TaskResponse> content = page.getContent().stream()
+				.map(this::toTaskResponse)
+				.toList();
+		return PageResponse.from(page, content);
+	}
+
+	@Override
 	@Transactional
 	public TaskResponse update(Long id, TaskUpdateRequest request) {
 		Task task = taskRepository.findById(id)
 				.orElseThrow(() -> new ResourceNotFoundException("Task not found with id: " + id));
-		if (!task.isDeleted() || !task.getProject().isDeleted() || !task.getProject().getWorkspace().isDeleted()) {
+		if (!task.isActive() || !task.getProject().isActive() || !task.getProject().getWorkspace().isActive()) {
 			throw new ResourceNotFoundException("Task not found with id: " + id);
 		}
 		validateOwner(task.getProject().getWorkspace().getId());
 
+		String oldTitle = task.getTitle();
+		String oldDescription = task.getDescription();
 		TaskStatus oldStatus = task.getStatus();
 		TaskPriority oldPriority = task.getPriority();
 		Long oldAssigneeId = task.getAssignee() != null ? task.getAssignee().getId() : null;
+		String oldAssigneeName = task.getAssignee() != null ? task.getAssignee().getUsername() : null;
+		LocalDate oldDeadline = task.getDeadline();
 
 		if (request.getTitle() != null) {
 			task.setTitle(request.getTitle());
@@ -155,11 +187,16 @@ public class TaskServiceImpl implements TaskService {
 		Long currentUserId = getCurrentUserId();
 		Long newAssigneeId = task.getAssignee() != null ? task.getAssignee().getId() : null;
 		User assigneeUser = task.getAssignee();
+		String newAssigneeName = task.getAssignee() != null ? task.getAssignee().getUsername() : null;
 
 		boolean statusChanged = request.getStatus() != null && !request.getStatus().equals(oldStatus);
 		boolean priorityChanged = request.getPriority() != null && !request.getPriority().equals(oldPriority);
 		boolean assigneeChanged = newAssigneeId != null && !newAssigneeId.equals(oldAssigneeId);
 		boolean taskClaimed = oldAssigneeId == null && newAssigneeId != null;
+		boolean taskUnassigned = request.isUnassign() && oldAssigneeId != null;
+		boolean titleChanged = request.getTitle() != null && !request.getTitle().equals(oldTitle);
+		boolean descriptionChanged = request.getDescription() != null && !request.getDescription().equals(oldDescription);
+		boolean deadlineChanged = request.getDeadline() != null && !request.getDeadline().equals(oldDeadline);
 
 		if (statusChanged && assigneeUser != null) {
 			notificationService.createNotification("Trạng thái nhiệm vụ đã thay đổi: " + task.getTitle(),
@@ -179,7 +216,7 @@ public class TaskServiceImpl implements TaskService {
 		if (taskClaimed) {
 			notificationService.createNotification("Nhiệm vụ đã được nhận: " + task.getTitle(),
 					assigneeUser.getUsername() + " đã nhận nhiệm vụ \"" + task.getTitle() + "\".",
-					NotificationType.TASK_CLAIMED, currentUserId, assigneeUser.getId(), task.getId(),
+					NotificationType.TASK_CLAIMED, assigneeUser.getId(), currentUserId, task.getId(),
 					task.getProject().getId(), workspaceId);
 		} else if (assigneeChanged) {
 			notificationService.createNotification("Bạn được gán nhiệm vụ: " + task.getTitle(),
@@ -187,6 +224,38 @@ public class TaskServiceImpl implements TaskService {
 							+ "\".",
 					NotificationType.TASK_ASSIGNED, newAssigneeId, currentUserId, task.getId(),
 					task.getProject().getId(), workspaceId);
+		}
+
+		if (titleChanged) {
+			activityLogService.log(EntityType.TASK, task.getId(), ActivityAction.UPDATED,
+					"title", oldTitle, request.getTitle(), currentUserId, workspaceId);
+		}
+		if (descriptionChanged) {
+			activityLogService.log(EntityType.TASK, task.getId(), ActivityAction.UPDATED,
+					"description", oldDescription, request.getDescription(), currentUserId, workspaceId);
+		}
+		if (statusChanged) {
+			activityLogService.log(EntityType.TASK, task.getId(), ActivityAction.STATUS_CHANGED,
+					"status", oldStatus.name(), task.getStatus().name(), currentUserId, workspaceId);
+		}
+		if (priorityChanged) {
+			activityLogService.log(EntityType.TASK, task.getId(), ActivityAction.PRIORITY_CHANGED,
+					"priority", oldPriority.name(), task.getPriority().name(), currentUserId, workspaceId);
+		}
+		if (taskClaimed || assigneeChanged) {
+			activityLogService.log(EntityType.TASK, task.getId(), ActivityAction.ASSIGNED,
+					"assignee", oldAssigneeName, newAssigneeName, currentUserId, workspaceId);
+		}
+		if (taskUnassigned) {
+			activityLogService.log(EntityType.TASK, task.getId(), ActivityAction.UNASSIGNED,
+					"assignee", oldAssigneeName, null, currentUserId, workspaceId);
+		}
+		if (deadlineChanged) {
+			activityLogService.log(EntityType.TASK, task.getId(), ActivityAction.UPDATED,
+					"deadline",
+					oldDeadline != null ? oldDeadline.toString() : null,
+					request.getDeadline() != null ? request.getDeadline().toString() : null,
+					currentUserId, workspaceId);
 		}
 
 		return toTaskResponse(task);
@@ -197,7 +266,7 @@ public class TaskServiceImpl implements TaskService {
 	public void delete(Long id) {
 		Task task = taskRepository.findById(id)
 				.orElseThrow(() -> new ResourceNotFoundException("Task not found with id: " + id));
-		if (!task.isDeleted() || !task.getProject().isDeleted() || !task.getProject().getWorkspace().isDeleted()) {
+		if (!task.isActive() || !task.getProject().isActive() || !task.getProject().getWorkspace().isActive()) {
 			throw new ResourceNotFoundException("Task not found with id: " + id);
 		}
 		validateOwner(task.getProject().getWorkspace().getId());
@@ -208,11 +277,15 @@ public class TaskServiceImpl implements TaskService {
 		Long projectId = task.getProject().getId();
 		Long workspaceId = task.getProject().getWorkspace().getId();
 
-		task.setDeleted(false);
+		task.setActive(false);
 		taskRepository.save(task);
 
+		Long senderId = getCurrentUserId();
+
+		activityLogService.log(EntityType.TASK, task.getId(), ActivityAction.DELETED,
+				null, null, taskTitle, senderId, workspaceId);
+
 		if (assigneeId != null) {
-			Long senderId = getCurrentUserId();
 			notificationService.createNotification(
 					"Nhiệm vụ đã bị xóa: " + taskTitle,
 					"Nhiệm vụ \"" + taskTitle + "\" đã bị xóa khỏi dự án \"" + projectName + "\".",
@@ -262,11 +335,11 @@ public class TaskServiceImpl implements TaskService {
 		Project project = task.getProject();
 
 		if (project.getStartDate() != null && task.getDeadline().isBefore(project.getStartDate())) {
-			throw new InvalidOperationException(
+			throw new BusinessException(
 					"Task deadline cannot be before project start date (" + project.getStartDate() + ").");
 		}
 		if (project.getEndDate() != null && task.getDeadline().isAfter(project.getEndDate())) {
-			throw new InvalidOperationException(
+			throw new BusinessException(
 					"Task deadline cannot be after project end date (" + project.getEndDate() + ").");
 		}
 	}

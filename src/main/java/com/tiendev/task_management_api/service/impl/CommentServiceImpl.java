@@ -13,8 +13,11 @@ import com.tiendev.task_management_api.dto.CommentResponse;
 import com.tiendev.task_management_api.dto.UserResponse;
 import com.tiendev.task_management_api.dto.request.CommentCreateRequest;
 import com.tiendev.task_management_api.dto.request.CommentUpdateRequest;
+import com.tiendev.task_management_api.exception.BusinessException;
 import com.tiendev.task_management_api.exception.InvalidOperationException;
 import com.tiendev.task_management_api.exception.ResourceNotFoundException;
+import com.tiendev.task_management_api.model.enums.ActivityAction;
+import com.tiendev.task_management_api.model.enums.EntityType;
 import com.tiendev.task_management_api.model.Comment;
 import com.tiendev.task_management_api.model.Task;
 import com.tiendev.task_management_api.model.User;
@@ -22,6 +25,7 @@ import com.tiendev.task_management_api.repository.CommentRepository;
 import com.tiendev.task_management_api.repository.TaskRepository;
 import com.tiendev.task_management_api.repository.UserRepository;
 import com.tiendev.task_management_api.repository.WorkspaceMemberRepository;
+import com.tiendev.task_management_api.service.ActivityLogService;
 import com.tiendev.task_management_api.service.CommentService;
 
 import lombok.RequiredArgsConstructor;
@@ -34,6 +38,7 @@ public class CommentServiceImpl implements CommentService {
 	private final TaskRepository taskRepository;
 	private final UserRepository userRepository;
 	private final WorkspaceMemberRepository workspaceMemberRepository;
+	private final ActivityLogService activityLogService;
 
 	@Override
 	@Transactional
@@ -58,6 +63,10 @@ public class CommentServiceImpl implements CommentService {
 		comment.setContent(request.getContent());
 
 		comment = commentRepository.save(comment);
+
+		activityLogService.log(EntityType.COMMENT, comment.getId(), ActivityAction.CREATED,
+				null, null, request.getContent(), user.getId(), workspaceId);
+
 		return toCommentResponse(comment);
 	}
 
@@ -76,9 +85,9 @@ public class CommentServiceImpl implements CommentService {
 	public List<CommentResponse> getAll() {
 		Set<Long> memberWorkspaceIds = getMemberWorkspaceIds();
 		return commentRepository.findAll().stream()
-				.filter(c -> c.getTask().isDeleted()
-						&& c.getTask().getProject().isDeleted()
-						&& c.getTask().getProject().getWorkspace().isDeleted()
+				.filter(c -> c.getTask().isActive()
+						&& c.getTask().getProject().isActive()
+						&& c.getTask().getProject().getWorkspace().isActive()
 						&& memberWorkspaceIds.contains(c.getTask().getProject().getWorkspace().getId()))
 				.map(this::toCommentResponse)
 				.toList();
@@ -92,8 +101,14 @@ public class CommentServiceImpl implements CommentService {
 		validateParentChain(comment.getTask());
 		validateCommentAuthor(comment);
 
+		String oldContent = comment.getContent();
 		comment.setContent(request.getContent());
 		comment = commentRepository.save(comment);
+
+		Long workspaceId = comment.getTask().getProject().getWorkspace().getId();
+		activityLogService.log(EntityType.COMMENT, comment.getId(), ActivityAction.UPDATED,
+				"content", oldContent, request.getContent(), getCurrentUserId(), workspaceId);
+
 		return toCommentResponse(comment);
 	}
 
@@ -104,7 +119,13 @@ public class CommentServiceImpl implements CommentService {
 				.orElseThrow(() -> new ResourceNotFoundException("Comment not found with id: " + id));
 		validateParentChain(comment.getTask());
 		validateCommentAuthor(comment);
+		Long workspaceId = comment.getTask().getProject().getWorkspace().getId();
+		Long commentId = comment.getId();
+		String content = comment.getContent();
 		commentRepository.delete(comment);
+
+		activityLogService.log(EntityType.COMMENT, commentId, ActivityAction.DELETED,
+				null, null, content, getCurrentUserId(), workspaceId);
 	}
 
 	private void validateCommentAuthor(Comment comment) {
@@ -134,8 +155,8 @@ public class CommentServiceImpl implements CommentService {
 	}
 
 	private void validateParentChain(Task task) {
-		if (!task.isDeleted() || !task.getProject().isDeleted() || !task.getProject().getWorkspace().isDeleted()) {
-			throw new InvalidOperationException("Cannot perform operation: the associated task or its parent entities are deleted.");
+		if (!task.isActive() || !task.getProject().isActive() || !task.getProject().getWorkspace().isActive()) {
+            throw new BusinessException("Cannot perform operation: the associated task or its parent entities are deleted.");
 		}
 	}
 

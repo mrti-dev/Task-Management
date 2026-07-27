@@ -64,7 +64,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
 		Long currentUserId = getCurrentUserId();
 		Workspace workspace = workspaceRepository.findById(id)
 				.orElseThrow(() -> new ResourceNotFoundException("Workspace not found with id: " + id));
-		if (!workspace.isDeleted()) {
+		if (!workspace.isActive()) {
 			throw new ResourceNotFoundException("Workspace not found with id: " + id);
 		}
 		if (!workspaceMemberRepository.existsByWorkspaceIdAndUserId(id, currentUserId)) {
@@ -78,7 +78,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
 	public List<WorkspaceResponse> getAll() {
 		Set<Long> memberWorkspaceIds = getMemberWorkspaceIds();
 		return workspaceRepository.findAll().stream()
-				.filter(w -> w.isDeleted() && memberWorkspaceIds.contains(w.getId()))
+				.filter(w -> w.isActive() && memberWorkspaceIds.contains(w.getId()))
 				.map(this::toWorkspaceResponse)
 				.toList();
 	}
@@ -88,7 +88,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
 	public WorkspaceResponse update(Long id, WorkspaceUpdateRequest request) {
 		Workspace workspace = workspaceRepository.findById(id)
 				.orElseThrow(() -> new ResourceNotFoundException("Workspace not found with id: " + id));
-		if (!workspace.isDeleted()) {
+		if (!workspace.isActive()) {
 			throw new ResourceNotFoundException("Workspace not found with id: " + id);
 		}
 		validateOwner(workspace.getId());
@@ -109,11 +109,11 @@ public class WorkspaceServiceImpl implements WorkspaceService {
 	public void delete(Long id) {
 		Workspace workspace = workspaceRepository.findById(id)
 				.orElseThrow(() -> new ResourceNotFoundException("Workspace not found with id: " + id));
-		if (!workspace.isDeleted()) {
+		if (!workspace.isActive()) {
 			throw new ResourceNotFoundException("Workspace not found with id: " + id);
 		}
 		validateOwner(workspace.getId());
-		workspace.setDeleted(false);
+		workspace.setActive(false);
 		workspaceRepository.save(workspace);
 	}
 
@@ -149,7 +149,7 @@ public class WorkspaceServiceImpl implements WorkspaceService {
 		return WorkspaceResponse.builder().id(workspace.getId()).name(workspace.getName())
 				.description(workspace.getDescription()).owner(ownerResponse)
 				.memberCount(workspace.getMembers().size())
-				.projectCount((int) workspace.getProjects().stream().filter(Project::isDeleted).count())
+				.projectCount((int) workspace.getProjects().stream().filter(Project::isActive).count())
 				.createdAt(workspace.getCreatedAt())
 				.updatedAt(workspace.getUpdatedAt()).build();
 	}

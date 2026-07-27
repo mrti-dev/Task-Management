@@ -69,8 +69,8 @@ public class Task {
 	@Column(name = "deadline")
 	private LocalDate deadline;
 
-	@Column(name = "deleted", nullable = false)
-	private boolean deleted = true;
+	@Column(name = "active", nullable = false)
+	private boolean active = true;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;

@@ -3,6 +3,7 @@ package com.tiendev.task_management_api.service.impl;
 import com.tiendev.task_management_api.dto.NotificationResponse;
 import com.tiendev.task_management_api.dto.PageResponse;
 import com.tiendev.task_management_api.dto.UserResponse;
+import com.tiendev.task_management_api.exception.InvalidOperationException;
 import com.tiendev.task_management_api.exception.ResourceNotFoundException;
 import com.tiendev.task_management_api.model.*;
 import com.tiendev.task_management_api.model.enums.NotificationType;
@@ -11,6 +12,7 @@ import com.tiendev.task_management_api.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +24,7 @@ public class NotificationServiceImpl implements NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
+    private final SimpMessagingTemplate messagingTemplate;
     private final TaskRepository taskRepository;
     private final ProjectRepository projectRepository;
     private final WorkspaceRepository workspaceRepository;
@@ -54,9 +57,12 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     @Transactional
-    public void markAsRead(Long notificationId) {
+    public void markAsRead(Long notificationId, Long userId) {
         Notification notification = notificationRepository.findById(notificationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Notification not found with id: " + notificationId));
+        if (!notification.getReceiver().getId().equals(userId)) {
+            throw new InvalidOperationException("You can only mark your own notifications as read.");
+        }
         notification.setRead(true);
         notificationRepository.save(notification);
     }
@@ -100,11 +106,20 @@ public class NotificationServiceImpl implements NotificationService {
         notification.setProject(project);
         notification.setWorkspace(workspace);
 
-        return notificationRepository.save(notification);
+        notification = notificationRepository.save(notification);
+
+        NotificationResponse response = toNotificationResponse(notification);
+        messagingTemplate.convertAndSendToUser(
+                String.valueOf(receiverId),
+                "/queue/notifications",
+                response
+        );
+
+        return notification;
     }
 
     private String generateLink(Notification notification) {
-        if (notification.getTask() != null) {
+        if (notification.getTask() != null && notification.getProject() != null) {
             Long workspaceId = notification.getWorkspace().getId();
             Long projectId = notification.getProject().getId();
             Long taskId = notification.getTask().getId();
