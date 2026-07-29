@@ -245,11 +245,15 @@ public class ProjectServiceImpl implements ProjectService {
     private void sendProjectNotification(Project project, NotificationType type, String title, String content) {
         Workspace workspace = project.getWorkspace();
         Long senderId = getCurrentUserId();
+        Long ownerId = workspaceMemberRepository.findByWorkspaceIdAndRole(workspace.getId(), WorkspaceRole.OWNER)
+                .map(m -> m.getUser().getId()).orElse(null);
 
         List<WorkspaceMember> members = workspaceMemberRepository.findByWorkspaceId(workspace.getId());
         for (WorkspaceMember member : members) {
             if (member.getUser().getId().equals(senderId)) {
-                continue;
+                if (!member.getUser().getId().equals(ownerId)) {
+                    continue;
+                }
             }
             notificationService.createNotification(
                     title, content, type,

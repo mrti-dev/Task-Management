@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class WorkspaceMemberResponse {
     private Long id;
+    private Long workspaceId;
     private UserResponse user;
     private WorkspaceRole role;
     private LocalDateTime joinedAt;

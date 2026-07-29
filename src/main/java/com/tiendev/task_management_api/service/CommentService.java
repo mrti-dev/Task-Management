@@ -10,6 +10,7 @@ public interface CommentService {
     CommentResponse create(CommentCreateRequest request);
     CommentResponse getById(Long id);
     List<CommentResponse> getAll();
+    List<CommentResponse> getByTaskId(Long taskId);
     CommentResponse update(Long id, CommentUpdateRequest request);
     void delete(Long id);
 }

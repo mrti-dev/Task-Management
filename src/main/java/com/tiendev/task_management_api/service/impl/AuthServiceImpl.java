@@ -48,9 +48,6 @@ public class AuthServiceImpl implements AuthService {
 	@Override
 	@Transactional
 	public AuthResponse register(UserCreateRequest request) {
-		if (userRepository.existsByUsername(request.getUsername())) {
-			throw new ResourceAlreadyExistsException("Username already exists: " + request.getUsername());
-		}
 		if (userRepository.existsByEmail(request.getEmail())) {
 			throw new ResourceAlreadyExistsException("Email already exists: " + request.getEmail());
 		}

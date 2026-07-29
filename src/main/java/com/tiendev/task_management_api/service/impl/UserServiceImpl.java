@@ -2,6 +2,8 @@ package com.tiendev.task_management_api.service.impl;
 
 import java.util.List;
 
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -94,6 +96,34 @@ public class UserServiceImpl implements UserService {
 	}
 
 	@Override
+	@Transactional(readOnly = true)
+	public UserResponse getCurrentUser() {
+		Long currentUserId = getCurrentUserId();
+		return getById(currentUserId);
+	}
+
+	@Override
+	@Transactional
+	public UserResponse updateCurrentUser(UserUpdateRequest request) {
+		Long currentUserId = getCurrentUserId();
+		User user = userRepository.findById(currentUserId)
+				.orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + currentUserId));
+
+		if (request.getUsername() != null) {
+			if (request.getUsername().isBlank()) {
+				throw new IllegalArgumentException("Username must not be blank");
+			}
+			user.setUsername(request.getUsername());
+		}
+		if (request.getAvatar() != null) {
+			user.setAvatar(request.getAvatar());
+		}
+
+		user = userRepository.save(user);
+		return toUserResponse(user);
+	}
+
+	@Override
 	@Transactional
 	public void delete(Long id) {
 		if (!userRepository.existsById(id)) {
@@ -105,5 +135,10 @@ public class UserServiceImpl implements UserService {
 	private UserResponse toUserResponse(User user) {
 		return UserResponse.builder().id(user.getId()).username(user.getUsername()).email(user.getEmail())
 				.avatar(user.getAvatar()).role(user.getRole()).createdAt(user.getCreatedAt()).updatedAt(user.getUpdatedAt()).build();
+	}
+
+	private Long getCurrentUserId() {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		return Long.valueOf(auth.getName());
 	}
 }

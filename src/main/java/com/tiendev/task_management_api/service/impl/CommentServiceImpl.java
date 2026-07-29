@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -18,6 +20,7 @@ import com.tiendev.task_management_api.exception.InvalidOperationException;
 import com.tiendev.task_management_api.exception.ResourceNotFoundException;
 import com.tiendev.task_management_api.model.enums.ActivityAction;
 import com.tiendev.task_management_api.model.enums.EntityType;
+import com.tiendev.task_management_api.model.enums.NotificationType;
 import com.tiendev.task_management_api.model.Comment;
 import com.tiendev.task_management_api.model.Task;
 import com.tiendev.task_management_api.model.User;
@@ -27,6 +30,7 @@ import com.tiendev.task_management_api.repository.UserRepository;
 import com.tiendev.task_management_api.repository.WorkspaceMemberRepository;
 import com.tiendev.task_management_api.service.ActivityLogService;
 import com.tiendev.task_management_api.service.CommentService;
+import com.tiendev.task_management_api.service.NotificationService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -39,6 +43,8 @@ public class CommentServiceImpl implements CommentService {
 	private final UserRepository userRepository;
 	private final WorkspaceMemberRepository workspaceMemberRepository;
 	private final ActivityLogService activityLogService;
+	private final NotificationService notificationService;
+	private final SimpMessagingTemplate messagingTemplate;
 
 	@Override
 	@Transactional
@@ -67,7 +73,21 @@ public class CommentServiceImpl implements CommentService {
 		activityLogService.log(EntityType.COMMENT, comment.getId(), ActivityAction.CREATED,
 				null, null, request.getContent(), user.getId(), workspaceId);
 
-		return toCommentResponse(comment);
+		CommentResponse response = toCommentResponse(comment);
+		messagingTemplate.convertAndSend(
+				"/topic/workspace/" + workspaceId + "/tasks/" + task.getId() + "/comments",
+				response
+		);
+
+		if (task.getAssignee() != null && !task.getAssignee().getId().equals(currentUserId)) {
+			notificationService.createNotification(
+					"Bình luận mới: " + task.getTitle(),
+					user.getUsername() + " đã bình luận trong nhiệm vụ \"" + task.getTitle() + "\".",
+					NotificationType.COMMENT_CREATED, task.getAssignee().getId(), currentUserId,
+					task.getId(), task.getProject().getId(), workspaceId);
+		}
+
+		return response;
 	}
 
 	@Override
@@ -89,6 +109,16 @@ public class CommentServiceImpl implements CommentService {
 						&& c.getTask().getProject().isActive()
 						&& c.getTask().getProject().getWorkspace().isActive()
 						&& memberWorkspaceIds.contains(c.getTask().getProject().getWorkspace().getId()))
+				.map(this::toCommentResponse)
+				.toList();
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public List<CommentResponse> getByTaskId(Long taskId) {
+		return commentRepository.findByTaskId(taskId).stream()
+				.filter(c -> c.getTask().isActive() && c.getTask().getProject().isActive()
+						&& c.getTask().getProject().getWorkspace().isActive())
 				.map(this::toCommentResponse)
 				.toList();
 	}

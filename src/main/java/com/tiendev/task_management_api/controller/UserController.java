@@ -19,6 +19,18 @@ public class UserController {
 
     private final UserService userService;
 
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<UserResponse>> getCurrentUser() {
+        UserResponse response = userService.getCurrentUser();
+        return ApiResponse.success(response);
+    }
+
+    @PutMapping("/me")
+    public ResponseEntity<ApiResponse<UserResponse>> updateCurrentUser(@Valid @RequestBody UserUpdateRequest request) {
+        UserResponse response = userService.updateCurrentUser(request);
+        return ApiResponse.success(response);
+    }
+
     @PostMapping
     public ResponseEntity<ApiResponse<UserResponse>> create(@Valid @RequestBody UserCreateRequest request) {
         UserResponse response = userService.create(request);

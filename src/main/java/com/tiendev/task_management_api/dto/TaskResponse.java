@@ -16,6 +16,7 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class TaskResponse {
     private Long id;
+    private Long workspaceId;
     private Long projectId;
     private String projectName;
     private String title;

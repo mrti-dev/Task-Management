@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import com.tiendev.task_management_api.model.enums.TaskPriority;
 import com.tiendev.task_management_api.model.enums.TaskStatus;
 
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
@@ -30,7 +31,8 @@ public class TaskCreateRequest {
 
 	private TaskStatus status;
 
-	private Long assigneeId;
+	@Email
+	private String assigneeEmail;
 
 	private LocalDate deadline;
 }

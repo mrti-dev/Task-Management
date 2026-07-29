@@ -44,15 +44,16 @@ public class WorkspaceMemberServiceImpl implements WorkspaceMemberService {
     @Override
     @Transactional
     public WorkspaceMemberResponse create(WorkspaceMemberCreateRequest request) {
-        if (workspaceMemberRepository.existsByWorkspaceIdAndUserId(request.getWorkspaceId(), request.getUserId())) {
-            throw new ResourceAlreadyExistsException("User is already a member of this workspace");
-        }
-
         Workspace workspace = workspaceRepository.findById(request.getWorkspaceId())
                 .orElseThrow(() -> new ResourceNotFoundException("Workspace not found with id: " + request.getWorkspaceId()));
         validateOwner(request.getWorkspaceId());
-        User user = userRepository.findById(request.getUserId())
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + request.getUserId()));
+
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with email: " + request.getEmail()));
+
+        if (workspaceMemberRepository.existsByWorkspaceIdAndUserId(workspace.getId(), user.getId())) {
+            throw new ResourceAlreadyExistsException("User is already a member of this workspace");
+        }
 
         WorkspaceMember member = new WorkspaceMember();
         member.setWorkspace(workspace);
@@ -203,6 +204,7 @@ public class WorkspaceMemberServiceImpl implements WorkspaceMemberService {
 
         return WorkspaceMemberResponse.builder()
                 .id(member.getId())
+                .workspaceId(member.getWorkspace().getId())
                 .user(userResponse)
                 .role(member.getRole())
                 .joinedAt(member.getJoinedAt())

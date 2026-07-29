@@ -31,6 +31,12 @@ public class CommentController {
         return ApiResponse.success(responses);
     }
 
+    @GetMapping("/task/{taskId}")
+    public ResponseEntity<ApiResponse<List<CommentResponse>>> getByTaskId(@PathVariable Long taskId) {
+        List<CommentResponse> responses = commentService.getByTaskId(taskId);
+        return ApiResponse.success(responses);
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<CommentResponse>> getById(@PathVariable Long id) {
         CommentResponse response = commentService.getById(id);
